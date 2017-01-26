@@ -71,7 +71,8 @@
 #define KEY_SIZE        ((NAME_MAX - 15) / 2)
 #define VALUE_SIZE      32768
 #define PASSWORD_SIZE   VALUE_SIZE
-
+#define SPECIAL_KEY_ALIAS_SUFFIX_1 "_USRCERT_5asf6fd589fkljdsdgker45dfsncb4jkcjwejv5jk"
+#define SPECIAL_KEY_ALIAS_SUFFIX_2 "_USRPKEY_5asf6fd589fkljdsdgker45dfsncb4jkcjwejv5jk"
 
 struct BIGNUM_Delete {
     void operator()(BIGNUM* p) const {
@@ -411,6 +412,16 @@ static size_t writeFully(int fd, uint8_t* data, size_t size) {
     return size;
 }
 
+static bool is_special_key_alias(const char * file_name) {
+	char* end;
+	strtoul(file_name, &end, 10);
+    //ALOGD("is_special_key_alias -end = <%s>", end);
+	if (!strcmp(end, SPECIAL_KEY_ALIAS_SUFFIX_1) || !strcmp(end, SPECIAL_KEY_ALIAS_SUFFIX_2)) {
+		return true;
+	} else {
+		return false;
+	}
+}
 class Entropy {
 public:
     Entropy() : mRandom(-1) {}
@@ -870,14 +881,33 @@ public:
 
             // Skip anything that starts with a "."
             if (file->d_name[0] == '.' && strcmp(".masterkey", file->d_name)) {
+			//Consider changing this here in case we do want to support calls to reset (currently blocking it from java side)
+            //if (file->d_name[0] == '.') {
                 continue;
             }
-
+	    
+			//Skip if this is a special alias
+			if (is_special_key_alias((const char *)file->d_name)) {
+				continue;
+			}
+			
             unlinkat(dirfd(dir), file->d_name, 0);
         }
         closedir(dir);
         return true;
     }
+
+//TODO generate random key alias for each uid
+//    const char * getSpecialKeyAlias(Entropy* entropy) {
+//    	if (mSpecialKeyAlias == null) {
+//    		uint8_t temp[10];
+//    		if (entropy->generate_random_data(temp, sizeof(temp))) {
+//    			mSpecialKeyAlias = (char *)malloc(sizeof(char)*(sizeof(temp)+1));
+//    			sprintf(mSpecialKeyAlias, "%s", temp);
+//    		}
+//    	}
+//    	return mSpecialKeyAlias;
+//    }
 
 private:
     static const int MASTER_KEY_SIZE_BYTES = 16;
@@ -1039,6 +1069,8 @@ public:
 
         userState->zeroizeMasterKeysInMemory();
         userState->setState(STATE_UNINITIALIZED);
+		//Consider changing this here in case we do want to support calls to reset (currently blocking it from java side)
+        //userState->setState(STATE_LOCKED);
         return userState->reset();
     }
 
@@ -1066,6 +1098,10 @@ public:
                 continue;
             }
 
+	    //skip special key
+	    if (is_special_key_alias(file->d_name)) {
+	    	continue;
+	    }
             result = false;
             break;
         }
@@ -1156,7 +1192,7 @@ public:
     }
 
     ResponseCode saw(const android::String8& prefix, android::Vector<android::String16> *matches,
-            uid_t uid) {
+            uid_t uid, bool include_special_keys = false) {
 
         UserState* userState = getUserState(uid);
         size_t n = prefix.length();
@@ -1179,6 +1215,11 @@ public:
                 continue;
             }
 
+            //not showing the special key
+            if (!include_special_keys && is_special_key_alias(file->d_name)) {
+            	continue;
+            }
+	    
             if (!strncmp(prefix.string(), file->d_name, n)) {
                 const char* p = &file->d_name[n];
                 size_t plen = strlen(p);
@@ -1651,6 +1692,10 @@ public:
         }
 
         String8 name8(name);
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string()) &&
+        	(callingUid != (uid_t)targetUid || exist(name, targetUid) == ::NO_ERROR)) {
+        	return ::PERMISSION_DENIED;
+        }
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
 
         Blob keyBlob(item, itemLength, NULL, 0, ::TYPE_GENERIC);
@@ -1675,6 +1720,11 @@ public:
 
         String8 name8(name);
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
+
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string())) {
+        	return ::PERMISSION_DENIED;
+        }
+
         return mKeyStore->del(filename.string(), ::TYPE_GENERIC, targetUid);
     }
 
@@ -1688,11 +1738,16 @@ public:
 
         if (targetUid == -1) {
             targetUid = callingUid;
-        } else if (!is_granted_to(callingUid, targetUid)) {
+        } else if (callingUid != (uid_t)targetUid && !is_granted_to(callingUid, targetUid)) {
             return ::PERMISSION_DENIED;
         }
 
         String8 name8(name);
+
+        if (callingUid != (uid_t)targetUid && is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string())) {
+        	return ::PERMISSION_DENIED;
+        }
+
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
 
         if (access(filename.string(), R_OK) == -1) {
@@ -1734,6 +1789,7 @@ public:
 
         return mKeyStore->reset(callingUid) ? ::NO_ERROR : ::SYSTEM_ERROR;
     }
+
 
     /*
      * Here is the history. To improve the security, the parameters to generate the
@@ -1830,7 +1886,13 @@ public:
         } else if (!is_granted_to(callingUid, targetUid)) {
             return ::PERMISSION_DENIED;
         }
-
+	
+        String8 name8(name);
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string()) &&
+        	(callingUid != (uid_t)targetUid || exist(name, targetUid) == ::NO_ERROR)) {
+				return ::PERMISSION_DENIED;
+        }
+	
         State state = mKeyStore->getState(callingUid);
         if ((flags & KEYSTORE_FLAG_ENCRYPTED) && !isKeystoreUnlocked(state)) {
             ALOGW("calling generate in state: %d", state);
@@ -1956,7 +2018,6 @@ public:
             return ::SYSTEM_ERROR;
         }
 
-        String8 name8(name);
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, callingUid));
 
         Blob keyBlob(data, dataLength, NULL, 0, TYPE_KEY_PAIR);
@@ -1990,6 +2051,10 @@ public:
         }
 
         String8 name8(name);
+	if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string()) &&
+        	(callingUid != (uid_t)targetUid || exist(name, targetUid) == ::NO_ERROR)) {
+        	return ::PERMISSION_DENIED;
+        }
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
 
         return mKeyStore->importKey(data, length, filename.string(), targetUid, flags);
@@ -2168,6 +2233,9 @@ public:
         }
 
         String8 name8(name);
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, targetUid).string())) {
+        	return ::PERMISSION_DENIED;
+        }	
         String8 filename(mKeyStore->getKeyNameForUidWithDir(name8, targetUid));
         return mKeyStore->del(filename.string(), ::TYPE_KEY_PAIR, targetUid);
     }
@@ -2193,6 +2261,9 @@ public:
             return (errno != ENOENT) ? ::SYSTEM_ERROR : ::KEY_NOT_FOUND;
         }
 
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(name8, callingUid).string())) {
+        	return ::PERMISSION_DENIED;
+        }
         mKeyStore->addGrant(filename.string(), granteeUid);
         return ::NO_ERROR;
     }
@@ -2295,7 +2366,9 @@ public:
 
         String8 source8(srcKey);
         String8 sourceFile(mKeyStore->getKeyNameForUidWithDir(source8, srcUid));
-
+        if (is_special_key_alias(mKeyStore->getKeyNameForUid(source8, srcUid).string())) {
+        	return ::PERMISSION_DENIED;
+        }
         String8 target8(destKey);
         String8 targetFile(mKeyStore->getKeyNameForUidWithDir(target8, destUid));
 
@@ -2318,7 +2391,7 @@ public:
         return mKeyStore->isHardwareBacked(keyType) ? 1 : 0;
     }
 
-    int32_t clear_uid(int64_t targetUid64) {
+    int32_t clear_uid(int64_t targetUid64, bool include_special_keys = true) {
         uid_t targetUid = static_cast<uid_t>(targetUid64);
         uid_t callingUid = IPCThreadState::self()->getCallingUid();
         pid_t spid = IPCThreadState::self()->getCallingPid();
@@ -2335,14 +2408,15 @@ public:
         }
 
         const keymaster_device_t* device = mKeyStore->getDevice();
-        if (device == NULL) {
+		if (device == NULL) {
             ALOGW("can't get keymaster device");
             return ::SYSTEM_ERROR;
         }
 
         String8 prefix = String8::format("%u_", targetUid);
         Vector<String16> aliases;
-        if (mKeyStore->saw(prefix, &aliases, targetUid) != ::NO_ERROR) {
+		//bool include_special_keys = true;
+        if (mKeyStore->saw(prefix, &aliases, targetUid, include_special_keys) != ::NO_ERROR) {
             return ::SYSTEM_ERROR;
         }
 

@@ -122,7 +122,7 @@ public:
 
     virtual int32_t is_hardware_backed(const String16& keyType) = 0;
 
-    virtual int32_t clear_uid(int64_t uid) = 0;
+    virtual int32_t clear_uid(int64_t uid, bool is_special_keys = true) = 0;
 
     virtual int32_t reset_uid(int32_t uid) = 0;
 

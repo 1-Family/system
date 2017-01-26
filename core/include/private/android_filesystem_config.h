@@ -79,6 +79,7 @@
 #define AID_LOGD          1036  /* log daemon */
 #define AID_SHARED_RELRO  1037  /* creator of shared GNU RELRO files */
 
+#define AID_ECRYPTFS      1500  /* ecryptfs daemon */
 #define AID_SHELL         2000  /* adb and debug shell user */
 #define AID_CACHE         2001  /* cache access */
 #define AID_DIAG          2002  /* access to diagnostic resources */
@@ -173,6 +174,7 @@ static const struct android_id_info android_ids[] = {
     { "everybody",     AID_EVERYBODY, },
     { "misc",          AID_MISC, },
     { "nobody",        AID_NOBODY, },
+    { "ecryptfs",  AID_ECRYPTFS, },
 };
 
 #define android_id_count \
@@ -198,6 +200,8 @@ static const struct fs_path_config android_dirs[] = {
     { 00771, AID_SYSTEM, AID_SYSTEM, 0, "data/app-private" },
     { 00771, AID_ROOT,   AID_ROOT,   0, "data/dalvik-cache" },
     { 00771, AID_SYSTEM, AID_SYSTEM, 0, "data/data" },
+    { 00771, AID_SYSTEM, AID_SYSTEM, 0, "data/private_data" },
+    { 00771, AID_SYSTEM, AID_SYSTEM, 0, "data/business_data" },
     { 00771, AID_SHELL,  AID_SHELL,  0, "data/local/tmp" },
     { 00771, AID_SHELL,  AID_SHELL,  0, "data/local" },
     { 01771, AID_SYSTEM, AID_MISC,   0, "data/misc" },
@@ -236,6 +240,8 @@ static const struct fs_path_config android_files[] = {
     { 00644, AID_MEDIA_RW,  AID_MEDIA_RW,  0, "data/media/*" },
     { 00644, AID_SYSTEM,    AID_SYSTEM,    0, "data/app-private/*" },
     { 00644, AID_APP,       AID_APP,       0, "data/data/*" },
+    { 00644, AID_APP,       AID_APP,       0, "data/private_data/*" },
+    { 00644, AID_APP,       AID_APP,       0, "data/business_data/*" },
     { 00755, AID_ROOT,      AID_ROOT,      0, "system/bin/ping" },
 
     /* the following file is INTENTIONALLY set-gid and not set-uid.

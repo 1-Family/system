@@ -20,6 +20,8 @@ static char *INIT_DIRS[] = {
     "/data/local",
     "/data/local/tmp",
     "/data/data",
+    "/data/private_data",
+    "/data/business_data",
     "/data/app_private",
     "/data/app",
     NULL

@@ -33,6 +33,8 @@ on init
     sysclktz 0
 
     loglevel 3
+    export ANDROID_PRIVATE_DATA /data/private_data
+    export ANDROID_BUSINESS_DATA /data/business_data
 
     # Backward compatibility
     symlink /system/etc /etc
@@ -149,6 +151,11 @@ on init
     # This is needed by any process that uses socket tagging.
     chmod 0644 /dev/xt_qtaguid
 
+    # Allow everybody to r/w ecryptfs miscdev.
+    # This is needed by any android application
+    # chmod 0666 /dev/ecryptfs
+    chown ecryptfs ecryptfs /dev/ecryptfs
+    
     # Create location for fs_mgr to store abbreviated output from filesystem
     # checker programs.
     mkdir /dev/fscklogs 0770 root system
@@ -283,6 +290,9 @@ on post-fs-data
     # Do not place files or directories in /data/local/tmp
     mkdir /data/local/tmp 0771 shell shell
     mkdir /data/data 0771 system system
+    #symlink /data/private_data /data/data
+    mkdir /data/private_data 0771 system system
+    mkdir /data/business_data 0771 system system
     mkdir /data/app-private 0771 system system
     mkdir /data/app-asec 0700 root root
     mkdir /data/app-lib 0771 system system
@@ -310,7 +320,7 @@ on post-fs-data
     mkdir /data/mediadrm 0770 mediadrm mediadrm
 
     # symlink to bugreport storage location
-    symlink /data/data/com.android.shell/files/bugreports /data/bugreports
+    symlink /data/private_data/com.android.shell/files/bugreports /data/bugreports
 
     # Separate location for storing security policy files on data
     mkdir /data/security 0711 system system
@@ -326,6 +336,9 @@ on post-fs-data
     # won't work.
     # Set indication (checked by vold) that we have finished this action
     #setprop vold.post_fs_data_done 1
+    
+    exec /system/bin/key-util
+    mount ecryptfs /data/business_data /data/business_data ecryptfs_sig=70c46bf6c5a108e0,ecryptfs_cipher=aes,ecryptfs_key_bytes=32,ecryptfs_unlink_sigs
 
 on boot
     # basic network init
@@ -619,6 +632,11 @@ service keystore /system/bin/keystore /data/misc/keystore
     class main
     user keystore
     group keystore drmrpc
+
+service ecryptfsd /system/bin/ecryptfsd -f
+    class main
+    user ecryptfs
+    group ecryptfs
 
 service dumpstate /system/bin/dumpstate -s
     class main

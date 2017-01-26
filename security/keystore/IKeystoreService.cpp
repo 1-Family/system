@@ -561,11 +561,12 @@ public:
         return ret;
     }
 
-    virtual int32_t clear_uid(int64_t uid)
+    virtual int32_t clear_uid(int64_t uid, bool include_special_keys)
     {
         Parcel data, reply;
         data.writeInterfaceToken(IKeystoreService::getInterfaceDescriptor());
         data.writeInt64(uid);
+        data.writeInt32(include_special_keys ? 1 : 0);
         status_t status = remote()->transact(BnKeystoreService::CLEAR_UID, data, &reply);
         if (status != NO_ERROR) {
             ALOGD("clear_uid() could not contact remote: %d\n", status);
@@ -929,7 +930,8 @@ status_t BnKeystoreService::onTransact(
         case CLEAR_UID: {
             CHECK_INTERFACE(IKeystoreService, data, reply);
             int64_t uid = data.readInt64();
-            int32_t ret = clear_uid(uid);
+            bool include_special_keys = data.readInt32() == 1 ? true : false;
+            int32_t ret = clear_uid(uid, include_special_keys);
             reply->writeNoException();
             reply->writeInt32(ret);
             return NO_ERROR;

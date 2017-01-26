@@ -18,12 +18,14 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 
 #include <keystore/IKeystoreService.h>
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 
 #include <keystore/keystore.h>
+#include <sys/un.h>
 #include <openssl/evp.h>
 
 using namespace android;
@@ -176,6 +178,80 @@ static int32_t exist(sp<IKeystoreService> service, const String16& name) {
 	return ret;
 }
 
+static int create_address(const char* name, struct sockaddr_un* pAddr, socklen_t* pSockLen)
+{
+
+    int nameLen = strlen(name);
+    if (nameLen >= (int) sizeof(pAddr->sun_path) -1)  /* too long? */
+        return -1;
+    pAddr->sun_path[0] = '\0';  /* abstract namespace */
+    strcpy(pAddr->sun_path+1, name);
+    pAddr->sun_family = AF_LOCAL;
+    *pSockLen = 1 + nameLen + offsetof(struct sockaddr_un, sun_path);
+    return 0;
+}
+
+static int get_key_from_server(pid_t pid, uid_t user, int action, const unsigned char * from_key, size_t from_key_size, unsigned char * to_key, size_t expected_to_size,ssize_t * recv_bytes) {
+	int rc = 0;
+    struct sockaddr_un sockAddr;
+    socklen_t sockLen;
+    //char address[30] = {0};
+    char address[30] = "encrypt_1000_2372";
+    struct ucred credentials;
+    //sprintf(address,"encrypt_%d_%d", user, pid);
+
+    ALOGD("IDODOD - trying to connect to <%s>\n", address);
+	rc = create_address(address, &sockAddr, &sockLen);
+	if (rc >= 0) {
+		int fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+		if (fd >= 0) {
+			rc = connect(fd, (const struct sockaddr*) &sockAddr, sockLen);
+			if (rc >= 0) {
+				socklen_t len = sizeof(struct ucred);
+				rc = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &len);
+				if (rc >= 0) {
+					ALOGD("IDODOD - The remote socket uid is <%d>\n", credentials.uid);
+					if (credentials.uid == user) {
+						unsigned char * message = (unsigned char *)malloc(sizeof(unsigned char)*(from_key_size+1));
+						if (message) {
+							message[0] = action;
+							memcpy(message+1,from_key, from_key_size);
+							int bytes_sent = send(fd, message, from_key_size+1,0);
+							free(message);
+							if (bytes_sent) {
+								ssize_t nread = read(fd, to_key, expected_to_size);
+								 if (nread == -1 || nread == 0) {
+									 rc = -1;
+									 ALOGE("IDODOD - %s", strerror(errno));
+								 } else {
+									 rc = 0;
+									 *recv_bytes = nread;
+								 }
+							} else {
+								rc = -1;
+								ALOGE("IDODOD - %s", strerror(errno));
+							}
+						} else {
+							rc = -1;
+							ALOGE("IDODOD - Error allocating memory for message\n");
+						}
+					} else {
+						ALOGE("IDODOD - Error - The server is run by a wrong uid <%d>\n", credentials.uid);
+						rc = -1;
+					}
+				} else {
+					ALOGE("IDODOD - Error authenticating server, <%s>\n", strerror(errno));
+				}
+			} else {
+				ALOGE("IDODOD - %s", strerror(errno));
+			}
+		} else {
+			ALOGE("IDODOD - %s", strerror(errno));
+		}
+		close(fd);
+	}
+	return rc;
+}
 static int generate(sp<IKeystoreService> service, const String16& name, int uid, int flags) {
 	int rc = 0;
 	bool is_call_generate = true;
@@ -210,6 +286,23 @@ static int generate(sp<IKeystoreService> service, const String16& name, int uid,
 
 int main(int argc, char* argv[])
 {
+	int pid = atoi(argv[1]);
+	int user = atoi(argv[2]);
+	const  char * from_key = "my_key";
+	size_t from_key_size = 6;
+	unsigned char to_key[30] = {0};
+	size_t expected_to_size = 30;
+	ssize_t recv_bytes = 0;
+	int res = get_key_from_server(pid,
+			user,
+			0,
+			(const unsigned char *)from_key, from_key_size, to_key,
+			expected_to_size, &recv_bytes);
+	if (res) {
+		return 2;
+	} else {
+		return 1;
+	}
     if (argc < 2) {
         fprintf(stderr, "Usage: %s action [parameter ...]\n", argv[0]);
         return 1;
